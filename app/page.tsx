@@ -7,6 +7,8 @@ import { getEventSpan, detectDoubleBookings, getTransportStatus } from '@/lib/ut
 const CELL_W = 36;
 const ROW_H = 36;
 const LABEL_W = 192;
+const HEADER_H1 = 28; // month
+const HEADER_H2 = 24; // day
 const CATEGORIES: ItemCategory[] = ['設営系', '展示系', 'その他', '消耗品'];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -55,7 +57,7 @@ export default function TimelinePage() {
 
   const scrollToToday = () => {
     if (scrollRef.current) {
-      const offset = todayIndex * CELL_W - scrollRef.current.clientWidth / 2 + CELL_W / 2;
+      const offset = LABEL_W + todayIndex * CELL_W - scrollRef.current.clientWidth / 2 + CELL_W / 2;
       scrollRef.current.scrollLeft = Math.max(0, offset);
     }
   };
@@ -69,8 +71,9 @@ export default function TimelinePage() {
     setCollapsed(prev => ({ ...prev, [cat]: !prev[cat] }));
   };
 
-  const openNewEvent = () => {
-    setEditingEvent({ id: '', ...EMPTY_EVENT, startDate: today, endDate: today });
+  const openNewEvent = (date?: string) => {
+    const d = date ?? today;
+    setEditingEvent({ id: '', ...EMPTY_EVENT, startDate: d, endDate: d });
     setEditingIsNew(true);
   };
 
@@ -118,6 +121,8 @@ export default function TimelinePage() {
     });
   };
 
+  type Segment = { startIdx: number; width: number; status: string; conflict: boolean };
+
   const getBarsForItem = (item: Item) => {
     const itemConflicts = conflicts.get(item.id);
     return events
@@ -129,7 +134,6 @@ export default function TimelinePage() {
         const endIdx = dates.indexOf(span.end);
         if (startIdx < 0 || endIdx < 0) return null;
 
-        type Segment = { startIdx: number; width: number; status: string; conflict: boolean };
         const segments: Segment[] = [];
         for (let i = startIdx; i <= endIdx; i++) {
           const dateStr = dates[i];
@@ -163,9 +167,11 @@ export default function TimelinePage() {
     return headers;
   }, [dates]);
 
+  const totalWidth = LABEL_W + dates.length * CELL_W;
+
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
-      {/* Header bar */}
+      {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 bg-white border-b flex-shrink-0">
         <h1 className="text-lg font-bold text-gray-800">備品タイムライン</h1>
         <button
@@ -175,7 +181,7 @@ export default function TimelinePage() {
           今日
         </button>
         <button
-          onClick={openNewEvent}
+          onClick={() => openNewEvent()}
           className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
         >
           + イベント追加
@@ -305,150 +311,152 @@ export default function TimelinePage() {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
-        {/* Fixed label column */}
-        <div className="flex-shrink-0 bg-white border-r z-10" style={{ width: LABEL_W }}>
-          <div style={{ height: 52 }} className="border-b bg-gray-50" />
+      {/* Single scroll container — fixes vertical scroll desync */}
+      <div ref={scrollRef} className="flex-1 overflow-auto">
+        <div style={{ width: totalWidth }}>
+
+          {/* Month header */}
+          <div className="flex" style={{ height: HEADER_H1, position: 'sticky', top: 0, zIndex: 20 }}>
+            <div
+              className="bg-gray-50 border-b border-r flex-shrink-0"
+              style={{ width: LABEL_W, position: 'sticky', left: 0, zIndex: 30 }}
+            />
+            {monthHeaders.map((mh, i) => (
+              <div
+                key={i}
+                className="border-r border-b text-xs font-bold text-gray-600 flex items-center justify-center bg-gray-50 flex-shrink-0"
+                style={{ width: mh.count * CELL_W }}
+              >
+                {mh.label}
+              </div>
+            ))}
+          </div>
+
+          {/* Day header */}
+          <div className="flex" style={{ height: HEADER_H2, position: 'sticky', top: HEADER_H1, zIndex: 20 }}>
+            <div
+              className="bg-gray-50 border-b border-r flex-shrink-0"
+              style={{ width: LABEL_W, position: 'sticky', left: 0, zIndex: 30 }}
+            />
+            {dates.map((d) => {
+              const day = new Date(d).getDay();
+              const isToday = d === today;
+              return (
+                <div
+                  key={d}
+                  className={`border-r border-b text-xs flex items-center justify-center flex-shrink-0 ${
+                    isToday
+                      ? 'bg-indigo-600 text-white font-bold'
+                      : day === 0
+                      ? 'bg-red-50 text-red-400'
+                      : day === 6
+                      ? 'bg-blue-50 text-blue-400'
+                      : 'text-gray-400 bg-white'
+                  }`}
+                  style={{ width: CELL_W }}
+                >
+                  {new Date(d).getDate()}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Category + item rows */}
           {CATEGORIES.map(cat => {
             const catItems = items.filter(i => i.category === cat);
             if (catItems.length === 0) return null;
             return (
               <div key={cat}>
-                <button
-                  onClick={() => toggleCategory(cat)}
-                  className="w-full flex items-center gap-1 px-2 py-1 bg-gray-100 border-b text-xs font-bold text-gray-600 hover:bg-gray-200"
-                  style={{ height: ROW_H }}
-                >
-                  <span>{collapsed[cat] ? '▶' : '▼'}</span>
-                  {cat}
-                </button>
+                {/* Category header row */}
+                <div className="flex border-b" style={{ height: ROW_H }}>
+                  <button
+                    onClick={() => toggleCategory(cat)}
+                    className="flex items-center gap-1 px-2 bg-gray-100 border-r text-xs font-bold text-gray-600 hover:bg-gray-200 flex-shrink-0"
+                    style={{ width: LABEL_W, position: 'sticky', left: 0, zIndex: 10 }}
+                  >
+                    <span>{collapsed[cat] ? '▶' : '▼'}</span>
+                    {cat}
+                  </button>
+                  {dates.map(d => (
+                    <div
+                      key={d}
+                      className={`border-r flex-shrink-0 bg-gray-100 ${d === today ? 'bg-indigo-100' : ''}`}
+                      style={{ width: CELL_W, height: ROW_H }}
+                    />
+                  ))}
+                </div>
+
                 {!collapsed[cat] &&
                   catItems.map(item => {
                     const hasConflict = conflicts.has(item.id);
+                    const bars = getBarsForItem(item);
                     return (
                       <div
                         key={item.id}
-                        className={`flex items-center px-2 border-b text-xs truncate ${
-                          hasConflict ? 'text-red-600 bg-red-50' : 'text-gray-700'
-                        }`}
+                        className="flex border-b relative"
                         style={{ height: ROW_H }}
-                        title={item.name}
                       >
-                        {hasConflict && <span className="mr-1 flex-shrink-0">⚠</span>}
-                        <span className="truncate">{item.name}</span>
+                        {/* Sticky label cell */}
+                        <div
+                          className={`flex items-center px-2 border-r text-xs flex-shrink-0 ${
+                            hasConflict ? 'text-red-600 bg-red-50' : 'text-gray-700 bg-white'
+                          }`}
+                          style={{ width: LABEL_W, position: 'sticky', left: 0, zIndex: 10 }}
+                          title={item.name}
+                        >
+                          {hasConflict && <span className="mr-1 flex-shrink-0">⚠</span>}
+                          <span className="truncate">{item.name}</span>
+                        </div>
+
+                        {/* Date cells (clickable) */}
+                        {dates.map(d => (
+                          <div
+                            key={d}
+                            className={`border-r flex-shrink-0 cursor-pointer hover:bg-indigo-100 transition-colors ${
+                              d === today ? 'bg-indigo-50' : ''
+                            }`}
+                            style={{ width: CELL_W, height: ROW_H }}
+                            title={`${d} にイベントを追加`}
+                            onClick={() => openNewEvent(d)}
+                          />
+                        ))}
+
+                        {/* Event bars — left offset includes LABEL_W */}
+                        {bars.map((bar, bi) => {
+                          if (!bar) return null;
+                          return bar.segments.map((seg, si) => (
+                            <div
+                              key={`${bi}-${si}`}
+                              className={`absolute top-1 rounded text-white text-xs flex items-center px-1 overflow-hidden cursor-pointer hover:brightness-90 ${
+                                seg.conflict ? 'bg-red-500' : (STATUS_COLORS[seg.status] ?? 'bg-gray-400')
+                              }`}
+                              style={{
+                                left: LABEL_W + seg.startIdx * CELL_W + 1,
+                                width: seg.width - 2,
+                                height: ROW_H - 8,
+                                zIndex: 2,
+                              }}
+                              title={`${bar.event.name} (${bar.assignment.quantity}個) - ${seg.status}${seg.conflict ? ' ⚠ダブルブッキング' : ''} ／クリックで編集`}
+                              onClick={e => {
+                                e.stopPropagation();
+                                setEditingEvent(bar.event);
+                                setEditingIsNew(false);
+                              }}
+                            >
+                              {si === 0 && (
+                                <span className="truncate whitespace-nowrap text-xs leading-tight">
+                                  {bar.event.name} {bar.assignment.quantity}個
+                                </span>
+                              )}
+                            </div>
+                          ));
+                        })}
                       </div>
                     );
                   })}
               </div>
             );
           })}
-        </div>
-
-        {/* Scrollable timeline */}
-        <div ref={scrollRef} className="flex-1 overflow-x-auto overflow-y-auto">
-          <div style={{ width: dates.length * CELL_W, position: 'relative' }}>
-            {/* Month header */}
-            <div className="flex sticky top-0 z-10 bg-white border-b" style={{ height: 28 }}>
-              {monthHeaders.map((mh, i) => (
-                <div
-                  key={i}
-                  className="border-r text-xs font-bold text-gray-600 flex items-center justify-center bg-gray-50 flex-shrink-0"
-                  style={{ width: mh.count * CELL_W }}
-                >
-                  {mh.label}
-                </div>
-              ))}
-            </div>
-
-            {/* Day header */}
-            <div className="flex sticky top-7 z-10 bg-white border-b" style={{ height: 24 }}>
-              {dates.map((d) => {
-                const day = new Date(d).getDay();
-                const isToday = d === today;
-                return (
-                  <div
-                    key={d}
-                    className={`border-r text-xs flex items-center justify-center flex-shrink-0 ${
-                      isToday
-                        ? 'bg-indigo-600 text-white font-bold'
-                        : day === 0
-                        ? 'bg-red-50 text-red-400'
-                        : day === 6
-                        ? 'bg-blue-50 text-blue-400'
-                        : 'text-gray-400'
-                    }`}
-                    style={{ width: CELL_W }}
-                  >
-                    {new Date(d).getDate()}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Category + item rows */}
-            {CATEGORIES.map(cat => {
-              const catItems = items.filter(i => i.category === cat);
-              if (catItems.length === 0) return null;
-              return (
-                <div key={cat}>
-                  <div className="flex bg-gray-100 border-b" style={{ height: ROW_H }}>
-                    {dates.map(d => (
-                      <div
-                        key={d}
-                        className={`border-r flex-shrink-0 ${d === today ? 'bg-indigo-100' : ''}`}
-                        style={{ width: CELL_W, height: ROW_H }}
-                      />
-                    ))}
-                  </div>
-
-                  {!collapsed[cat] &&
-                    catItems.map(item => {
-                      const bars = getBarsForItem(item);
-                      return (
-                        <div
-                          key={item.id}
-                          className="relative flex border-b"
-                          style={{ height: ROW_H }}
-                        >
-                          {dates.map(d => (
-                            <div
-                              key={d}
-                              className={`border-r flex-shrink-0 ${d === today ? 'bg-indigo-50' : ''}`}
-                              style={{ width: CELL_W, height: ROW_H }}
-                            />
-                          ))}
-                          {bars.map((bar, bi) => {
-                            if (!bar) return null;
-                            return bar.segments.map((seg, si) => (
-                              <div
-                                key={`${bi}-${si}`}
-                                className={`absolute top-1 rounded text-white text-xs flex items-center px-1 overflow-hidden cursor-pointer hover:brightness-90 ${
-                                  seg.conflict ? 'bg-red-500' : (STATUS_COLORS[seg.status] ?? 'bg-gray-400')
-                                }`}
-                                style={{
-                                  left: seg.startIdx * CELL_W + 1,
-                                  width: seg.width - 2,
-                                  height: ROW_H - 8,
-                                  zIndex: 2,
-                                }}
-                                title={`${bar.event.name} (${bar.assignment.quantity}個) - ${seg.status}${seg.conflict ? ' ⚠ダブルブッキング' : ''} ／クリックで編集`}
-                                onClick={() => { setEditingEvent(bar.event); setEditingIsNew(false); }}
-                              >
-                                {si === 0 && (
-                                  <span className="truncate whitespace-nowrap text-xs leading-tight">
-                                    {bar.event.name} {bar.assignment.quantity}個
-                                  </span>
-                                )}
-                              </div>
-                            ));
-                          })}
-                        </div>
-                      );
-                    })}
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
 
@@ -464,6 +472,7 @@ export default function TimelinePage() {
           <span className="inline-block w-3 h-3 rounded bg-red-500" />
           ダブルブッキング
         </span>
+        <span className="text-gray-400">※ セルをクリックでイベント追加 / バーをクリックで編集</span>
       </div>
     </div>
   );
