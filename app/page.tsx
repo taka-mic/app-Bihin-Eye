@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getItems, getEvents } from '@/lib/storage';
-import { Item, Event, ItemCategory } from '@/lib/types';
+import { getItems, getEvents, saveEvents } from '@/lib/storage';
+import { Item, Event, ItemCategory, Assignment } from '@/lib/types';
 import { getEventSpan, detectDoubleBookings, getTransportStatus } from '@/lib/utils';
 
 const CELL_W = 36;
@@ -26,10 +26,20 @@ function generateDates(center: Date, before: number, after: number): string[] {
   return dates;
 }
 
+const EMPTY_EVENT: Omit<Event, 'id'> = {
+  name: '',
+  location: '',
+  startDate: '',
+  endDate: '',
+  assignments: [],
+};
+
 export default function TimelinePage() {
   const [items, setItems] = useState<Item[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
+  const [editingIsNew, setEditingIsNew] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
@@ -57,6 +67,55 @@ export default function TimelinePage() {
 
   const toggleCategory = (cat: string) => {
     setCollapsed(prev => ({ ...prev, [cat]: !prev[cat] }));
+  };
+
+  const openNewEvent = () => {
+    setEditingEvent({ id: '', ...EMPTY_EVENT, startDate: today, endDate: today });
+    setEditingIsNew(true);
+  };
+
+  const saveEvent = () => {
+    if (!editingEvent) return;
+    let updated: Event[];
+    if (editingIsNew) {
+      updated = [...events, { ...editingEvent, id: Date.now().toString() }];
+    } else {
+      updated = events.map(e => (e.id === editingEvent.id ? editingEvent : e));
+    }
+    setEvents(updated);
+    saveEvents(updated);
+    setEditingEvent(null);
+  };
+
+  const deleteEvent = (id: string) => {
+    if (!confirm('このイベントを削除しますか？')) return;
+    const updated = events.filter(e => e.id !== id);
+    setEvents(updated);
+    saveEvents(updated);
+    setEditingEvent(null);
+  };
+
+  const addAssignment = () => {
+    if (!editingEvent || items.length === 0) return;
+    setEditingEvent({
+      ...editingEvent,
+      assignments: [...editingEvent.assignments, { itemId: items[0].id, quantity: 1 }],
+    });
+  };
+
+  const updateAssignment = (idx: number, field: keyof Assignment, value: string | number) => {
+    if (!editingEvent) return;
+    const a = [...editingEvent.assignments];
+    a[idx] = { ...a[idx], [field]: value };
+    setEditingEvent({ ...editingEvent, assignments: a });
+  };
+
+  const removeAssignment = (idx: number) => {
+    if (!editingEvent) return;
+    setEditingEvent({
+      ...editingEvent,
+      assignments: editingEvent.assignments.filter((_, i) => i !== idx),
+    });
   };
 
   const getBarsForItem = (item: Item) => {
@@ -106,6 +165,7 @@ export default function TimelinePage() {
 
   return (
     <div className="flex flex-col" style={{ height: 'calc(100vh - 56px)' }}>
+      {/* Header bar */}
       <div className="flex items-center gap-3 px-4 py-2 bg-white border-b flex-shrink-0">
         <h1 className="text-lg font-bold text-gray-800">備品タイムライン</h1>
         <button
@@ -114,12 +174,136 @@ export default function TimelinePage() {
         >
           今日
         </button>
+        <button
+          onClick={openNewEvent}
+          className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+        >
+          + イベント追加
+        </button>
         {conflicts.size > 0 && (
           <span className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded font-medium">
             ⚠ ダブルブッキング {conflicts.size}件
           </span>
         )}
       </div>
+
+      {/* Event edit modal */}
+      {editingEvent && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+            <h2 className="text-lg font-bold mb-4">
+              {editingIsNew ? 'イベント追加' : 'イベント編集'}
+            </h2>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">イベント名</label>
+                <input
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  value={editingEvent.name}
+                  onChange={e => setEditingEvent({ ...editingEvent, name: e.target.value })}
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">開催場所</label>
+                <input
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  value={editingEvent.location}
+                  onChange={e => setEditingEvent({ ...editingEvent, location: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">開始日</label>
+                <input
+                  type="date"
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  value={editingEvent.startDate}
+                  onChange={e => setEditingEvent({ ...editingEvent, startDate: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">終了日</label>
+                <input
+                  type="date"
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  value={editingEvent.endDate}
+                  onChange={e => setEditingEvent({ ...editingEvent, endDate: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-bold text-gray-700">使用備品</h3>
+                <button
+                  onClick={addAssignment}
+                  className="text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+                >
+                  + 追加
+                </button>
+              </div>
+              {editingEvent.assignments.map((a, idx) => (
+                <div key={idx} className="flex items-center gap-2 mb-2">
+                  <select
+                    className="flex-1 border rounded px-2 py-1.5 text-sm"
+                    value={a.itemId}
+                    onChange={e => updateAssignment(idx, 'itemId', e.target.value)}
+                  >
+                    {items.map(item => (
+                      <option key={item.id} value={item.id}>
+                        {item.category} / {item.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    className="w-20 border rounded px-2 py-1.5 text-sm"
+                    value={a.quantity}
+                    onChange={e => updateAssignment(idx, 'quantity', parseInt(e.target.value) || 1)}
+                  />
+                  <span className="text-sm text-gray-500">個</span>
+                  <button
+                    onClick={() => removeAssignment(idx)}
+                    className="text-red-400 hover:text-red-600 text-lg leading-none"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              {editingEvent.assignments.length === 0 && (
+                <p className="text-xs text-gray-400">備品が未設定です</p>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-between">
+              <div>
+                {!editingIsNew && (
+                  <button
+                    onClick={() => deleteEvent(editingEvent.id)}
+                    className="px-4 py-2 bg-red-100 text-red-600 rounded text-sm hover:bg-red-200"
+                  >
+                    削除
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setEditingEvent(null)}
+                  className="px-4 py-2 border rounded text-sm hover:bg-gray-50"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={saveEvent}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700"
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         {/* Fixed label column */}
@@ -238,7 +422,7 @@ export default function TimelinePage() {
                             return bar.segments.map((seg, si) => (
                               <div
                                 key={`${bi}-${si}`}
-                                className={`absolute top-1 rounded text-white text-xs flex items-center px-1 overflow-hidden ${
+                                className={`absolute top-1 rounded text-white text-xs flex items-center px-1 overflow-hidden cursor-pointer hover:brightness-90 ${
                                   seg.conflict ? 'bg-red-500' : (STATUS_COLORS[seg.status] ?? 'bg-gray-400')
                                 }`}
                                 style={{
@@ -247,7 +431,8 @@ export default function TimelinePage() {
                                   height: ROW_H - 8,
                                   zIndex: 2,
                                 }}
-                                title={`${bar.event.name} (${bar.assignment.quantity}個) - ${seg.status}${seg.conflict ? ' ⚠ダブルブッキング' : ''}`}
+                                title={`${bar.event.name} (${bar.assignment.quantity}個) - ${seg.status}${seg.conflict ? ' ⚠ダブルブッキング' : ''} ／クリックで編集`}
+                                onClick={() => { setEditingEvent(bar.event); setEditingIsNew(false); }}
                               >
                                 {si === 0 && (
                                   <span className="truncate whitespace-nowrap text-xs leading-tight">
